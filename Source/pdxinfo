@@ -1,0 +1,6 @@
+version=0.0.1
+name=Game Template
+author=Matthew Lewis
+description=Game template to use for future Playdate projects.
+bundleID=com.mattoubatou.gametemplate
+imagePath=
