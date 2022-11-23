@@ -1,7 +1,8 @@
 # playdate-c-game-template
 Boilerplate C project for the Playdate console.
 
-Going to keep improving on this until it has a little sample of all the main features of PdSDK:
+Going to keep improving on this until it has a little sample of all the main features of PdSDK.
+
 Todo:
  - Sound
  - Key presses
