@@ -36,6 +36,6 @@ set path=<pathToYourRepo>\dev_env;<pathToYourRepo>\src;<pathToYourPlaydateSDKFol
 
 ## Build instructions
 1. Create build directory in your project root.
-2. `cd build.`
+2. `cd build`
 3. `cmake ..`
 4. Ensure cmake is installed first and ensure that you ran dev_env/shell.bat (sometimes vscode does run it when reopening my project folder).
