@@ -13,9 +13,9 @@
 typedef uint32_t uint32;
 
 PlaydateAPI* pd = NULL;
-struct playdate_sys* sys = NULL;
-struct playdate_sound* snd = NULL;
-struct playdate_graphics* gfx = NULL;
+const struct playdate_sys* sys = NULL;
+const struct playdate_sound* snd = NULL;
+const struct playdate_graphics* gfx = NULL;
 
 const char* fontpath = "/System/Fonts/Asheville-Sans-14-Bold.pft";
 LCDFont* font = NULL;
@@ -37,16 +37,13 @@ static game_entity Player;
 static char text[15] = "Game Template!";
 
 typedef struct game_music {
-	PDSynth* synth;
-	PDSynthInstrument* instrument;
-	ControlSignal* control;
-	SoundChannel* channel;
-	SequenceTrack* track;
 	SoundSequence* sequence;
+	SoundChannel* channel;
 	float volume;
+	int musicEnabled;
 } game_music;
-static game_music GameMusic;
 
+static game_music GameMusic;
 static SoundChannel* GameSFX = NULL;
 
 typedef struct sound_effect {
@@ -64,8 +61,10 @@ typedef struct sound_effect {
 	uint32 noteDelay;
 } sound_effect;
 
-static sound_effect bounce;
-static sound_effect bounce2;
+static sound_effect bounceSFX;
+static sound_effect bounce2SFX;
+static sound_effect crankDockedSFX;
+static sound_effect crankUndockedSFX;
 
 float deltaTime = 0;
 
@@ -98,41 +97,46 @@ static void playSFX(sound_effect* fx)
 		fx->noteFreq, fx->noteVel, fx->noteLength, fx->noteDelay);
 }
 
-static void setupRndMusic()
+static void setupMIDIMusic(game_music* Music, char* midiFileName)
 {
-	// 6.	Add events to control signal.
-	// 7.	Setup Channel.
-	// 8.	Add instrument to channel->addSource()
-	// 9.	Add control signal to track
-	// 10.	Add instrument to track.
-	// 11.	Add notes to track. (Could be done using MIDI files?)
-	// 12.	Setup Sequence.
-	// 13.	Add track to sequence
-	// 14.	Play sequence.
+	// 1. Create new Sequence
+	Music->sequence = snd->sequence->newSequence();
+	// 2. Load midi file
+	snd->sequence->loadMidiFile(Music->sequence, midiFileName); // from http://www.jsbach.net/midi/midi_goldbergvariations.html
+	// 3. Get track count.
+	int trackCount = snd->sequence->getTrackCount(Music->sequence);
 
-	// 1.	Setup synth
-	GameMusic.volume = 0.5;
-	GameMusic.synth = snd->synth->newSynth();
-	snd->synth->setWaveform(GameMusic.synth, kWaveformSquare);
-	snd->synth->setVolume(GameMusic.synth, GameMusic.volume, GameMusic.volume);
-	snd->synth->setAttackTime(GameMusic.synth, 0.4303f);
-	snd->synth->setDecayTime(GameMusic.synth, 0.37f);
-	snd->synth->setSustainLevel(GameMusic.synth, 0.4f);
-	snd->synth->setReleaseTime(GameMusic.synth, 0.257f);
+	for(int trackIndex = 0;
+		trackIndex < trackCount;
+		++trackIndex)
+	{
+		PDSynthInstrument* inst = snd->instrument->newInstrument();
+		snd->instrument->setVolume(inst, Music->volume, Music->volume);
+		
+		// NOTE (matt): Do we need 1 channel per instrument?
+		Music->channel = snd->channel->newChannel();
+		snd->channel->addSource(Music->channel, (SoundSource*)inst);
 
-	// 2	Setup Instrument.
-	GameMusic.instrument = snd->instrument->newInstrument();
-	
-	// 3	Add synth to Instrument voice.
-	snd->instrument->addVoice(GameMusic.instrument, GameMusic.synth, 0, 127, 0);
+		SequenceTrack* track = snd->sequence->getTrackAtIndex(Music->sequence, trackIndex);
+		snd->track->setInstrument(track, inst);
 
-	// 4	Setup Track
-	GameMusic.track = snd->track->newTrack();
-
-	// 5	Setup Control Signal.
-	GameMusic.control = snd->track->getSignalForController(GameMusic.track, 0, 1);
-
+		// setup synths
+		for (int polyIndex = snd->track->getPolyphony(track);
+			polyIndex > 0; --polyIndex)
+		{
+			PDSynth* synth = snd->synth->newSynth();
+			snd->synth->setWaveform(synth, kWaveformSquare);
+			snd->synth->setAttackTime(synth, 0.f);
+			snd->synth->setDecayTime(synth, 0.2f);
+			snd->synth->setSustainLevel(synth, 0.3f);
+			snd->synth->setReleaseTime(synth, 0.5f);
+			// add voice to inst
+			snd->instrument->addVoice(inst, synth, 0, 127, 0.0f);
+		}
+	}
 }
+
+static int crankDocked = 0;
 
 #ifdef _WINDLL
 __declspec(dllexport)
@@ -170,39 +174,72 @@ int eventHandler(PlaydateAPI* playdate, PDSystemEvent event, uint32_t arg)
 		Player.dy = 50.0f;
 
 		// SOUND
-		//setupRndMusic();
-		bounce.waveForm = kWaveformSquare;
-		bounce.attackTime = 0.f;
-		bounce.decayTime = 0.f;
-		bounce.sustainLevel = 1.f;
-		bounce.releaseTime = 0.1f;
-		bounce.volumeLeft = .05f;
-		bounce.volumeRight = .05f;
-		bounce.noteFreq = 739.99f; // F#5/Gb5
-		bounce.noteVel = 1.f;
-		bounce.noteLength = 0.1f;
-		bounce.noteDelay = 0;
-		setupSFX(GameSFX, &bounce, 1.f);
+		GameMusic.volume = .025f;
+		GameMusic.musicEnabled = 1;
+		setupMIDIMusic(&GameMusic, "bwv1087.mid");
+		snd->sequence->play(GameMusic.sequence, NULL, NULL);
 
-		bounce2.waveForm = kWaveformSquare;
-		bounce2.attackTime = 0.f;
-		bounce2.decayTime = 0.f;
-		bounce2.sustainLevel = 1.f;
-		bounce2.releaseTime = 0.1f;
-		bounce2.volumeLeft = .05f;
-		bounce2.volumeRight = .05f;
-		bounce2.noteFreq = 659.25f; // E5
-		bounce2.noteVel = 1.f;
-		bounce2.noteLength = 0.1f;
-		bounce2.noteDelay = 0;
-		setupSFX(GameSFX, &bounce2, 1.f);
+		bounceSFX.waveForm = kWaveformSquare;
+		bounceSFX.attackTime = 0.f;
+		bounceSFX.decayTime = 0.f;
+		bounceSFX.sustainLevel = 1.f;
+		bounceSFX.releaseTime = 0.1f;
+		bounceSFX.volumeLeft = .05f;
+		bounceSFX.volumeRight = .05f;
+		bounceSFX.noteFreq = 739.99f; // F#5/Gb5
+		bounceSFX.noteVel = 1.0;
+		bounceSFX.noteLength = 0.1f;
+		bounceSFX.noteDelay = 0;
+		setupSFX(GameSFX, &bounceSFX, 1.f);
+
+		bounce2SFX.waveForm = kWaveformSquare;
+		bounce2SFX.attackTime = 0.f;
+		bounce2SFX.decayTime = 0.f;
+		bounce2SFX.sustainLevel = 1.f;
+		bounce2SFX.releaseTime = 0.1f;
+		bounce2SFX.volumeLeft = .05f;
+		bounce2SFX.volumeRight = .05f;
+		bounce2SFX.noteFreq = 659.25f; // E5
+		bounce2SFX.noteVel = 1.f;
+		bounce2SFX.noteLength = 0.1f;
+		bounce2SFX.noteDelay = 0;
+		setupSFX(GameSFX, &bounce2SFX, 1.f);
+
+		crankDockedSFX.waveForm = kWaveformSquare;
+		crankDockedSFX.attackTime = 0.f;
+		crankDockedSFX.decayTime = 0.f;
+		crankDockedSFX.sustainLevel = 1.f;
+		crankDockedSFX.releaseTime = 0.1f;
+		crankDockedSFX.volumeLeft = .0f;
+		crankDockedSFX.volumeRight = .05f;
+		crankDockedSFX.noteFreq = 32.70f; // C1
+		crankDockedSFX.noteVel = 1.0;
+		crankDockedSFX.noteLength = 0.2f;
+		crankDockedSFX.noteDelay = 0;
+		setupSFX(GameSFX, &crankDockedSFX, 1.f);
+
+		crankUndockedSFX.waveForm = kWaveformSquare;
+		crankUndockedSFX.attackTime = 0.f;
+		crankUndockedSFX.decayTime = 0.f;
+		crankUndockedSFX.sustainLevel = 1.f;
+		crankUndockedSFX.releaseTime = 0.1f;
+		crankUndockedSFX.volumeLeft = .0f;
+		crankUndockedSFX.volumeRight = .05f;
+		crankUndockedSFX.noteFreq = 36.71f; // D1
+		crankUndockedSFX.noteVel = 1.0;
+		crankUndockedSFX.noteLength = 0.2f;
+		crankUndockedSFX.noteDelay = 0;
+		setupSFX(GameSFX, &crankUndockedSFX, 1.f);
 
 		// NOTE: If you set an update callback in the kEventInit handler, the system assumes the game is pure C and doesn't run any Lua code in the game
 		pd->display->setRefreshRate(0);
+		
 		gfx->drawBitmap(gameBg, 0, 0, kBitmapUnflipped);
-
-		sys->resetElapsedTime();
 		gfx->setDrawMode(kDrawModeNXOR);
+
+		// TODO(matt): Remember to add own sounds for docking/undocking crank
+		crankDocked = sys->isCrankDocked();
+		sys->setCrankSoundsDisabled(1);
 		sys->setUpdateCallback(update, pd);
 	}
 	
@@ -228,7 +265,7 @@ static int update(void* userdata)
 	float crankDelta = sys->getCrankChange();
 
 	// If crank is being moved, stop animating
-	if(crankDelta != 0) 
+	if(crankDelta != 0.f) 
 	{
 		Player.x += (Player.dx * crankDelta * deltaTime);
 		Player.y += (Player.dy * crankDelta * deltaTime);
@@ -240,32 +277,47 @@ static int update(void* userdata)
 	}
 
 	// Split up the collisions to make sure the bouncing text doesn't get stuck offscreen.
-	if (Player.x < 0)
+	if (Player.x < 0.f)
 	{
-		Player.x = 0;
+		Player.x = 0.f;
 		Player.dx = -Player.dx;
-		playSFX(&bounce);
+		snd->synth->setVolume(bounceSFX.synth, bounceSFX.volumeLeft, 0.f);
+		playSFX(&bounceSFX);
 	}
 	else if (Player.x > LCD_COLUMNS - textWidth)
 	{
 		Player.x = (float)(LCD_COLUMNS - textWidth);
 		Player.dx = -Player.dx;
-		playSFX(&bounce);
+		snd->synth->setVolume(bounceSFX.synth, 0.f, bounceSFX.volumeRight);
+		playSFX(&bounceSFX);
 	}
 
-	if (Player.y < 0)
+	if (Player.y < 0.f)
 	{
 		Player.y = 0;
 		Player.dy = -Player.dy;
-		playSFX(&bounce2);
+		playSFX(&bounce2SFX);
 	}
 	else if (Player.y > LCD_ROWS - textHeight)
 	{
 		Player.y = (float)(LCD_ROWS - textHeight);
 		Player.dy = -Player.dy;
-		playSFX(&bounce2);
+		playSFX(&bounce2SFX);
 	}
 
+	// Play custom sounds when crank docks/undocks. ENSURE DEFAULT SOUNDS ARE DISABLED.
+	int isCrankDocked = sys->isCrankDocked();
+	if (isCrankDocked && !crankDocked)
+	{
+		crankDocked = 1;
+		playSFX(&crankDockedSFX);
+	}
+	else if (!isCrankDocked && crankDocked)
+	{
+		crankDocked = 0;
+		playSFX(&crankUndockedSFX);
+	}
+	
 	gfx->drawText(text, strlen(text), kASCIIEncoding, (int)Player.x, (int)Player.y);
 	
 	sys->drawFPS(0, 0);
