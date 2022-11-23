@@ -1,7 +1,8 @@
 # playdate-c-game-template
 Boilerplate C project for the Playdate console.
 
-Going to keep improving on this until it has a little sample of all the main features of PdSDK:
+Going to keep improving on this until it has a little sample of all the main features of PdSDK.
+
 Todo:
  - Sound
  - Key presses
@@ -32,3 +33,9 @@ Again, change the paths to point to your repo e.g:
 ```
 set path=<pathToYourRepo>\dev_env;<pathToYourRepo>\src;<pathToYourPlaydateSDKFolder>\bin;%path%
 ```
+
+## Build instructions
+1. Create build directory in your project root.
+2. `cd build`
+3. `cmake ..`
+4. Ensure cmake is installed first and ensure that you ran dev_env/shell.bat (sometimes vscode does run it when reopening my project folder).
