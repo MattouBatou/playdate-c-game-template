@@ -11,7 +11,7 @@
                 "${env:windir}\\Sysnative\\cmd.exe",
                 "${env:windir}\\System32\\cmd.exe"
             ],
-            "args": ["/k","P:\\game_template\\dev_env\\shell.bat"],
+            "args": ["/k","P:\\playdate-c-game-template\\dev_env\\shell.bat"],
             "icon": "terminal-cmd"
         },
         "Git Bash": {
