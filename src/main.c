@@ -10,21 +10,13 @@
 
 #include "pd_api.h"
 
+// Instrument aliases
+// NOTE(matt): 0 indexed values skipping 0 and 1 due to those always being empty tracks in the exported .mid file.
+#define CHORDS		2
+#define BASS		3
+#define SNARE		4
+
 typedef uint32_t uint32;
-
-PlaydateAPI* pd = NULL;
-const struct playdate_sys* sys = NULL;
-const struct playdate_sound* snd = NULL;
-const struct playdate_graphics* gfx = NULL;
-
-const char* fontpath = "/System/Fonts/Asheville-Sans-14-Bold.pft";
-LCDFont* font = NULL;
-
-const char* gameBgPath = "gameBg.png";
-LCDBitmap* gameBg = NULL;
-
-static int textWidth;
-static int textHeight;
 
 typedef struct game_entity {
 	float x;
@@ -33,9 +25,6 @@ typedef struct game_entity {
 	float dy;
 } game_entity;
 
-static game_entity Player;
-static char text[15] = "Game Template!";
-
 typedef struct game_music {
 	SoundSequence* sequence;
 	SoundChannel* channel;
@@ -43,8 +32,16 @@ typedef struct game_music {
 	int musicEnabled;
 } game_music;
 
-static game_music GameMusic;
-static SoundChannel* GameSFX = NULL;
+typedef struct midi_synth {
+	PDSynth* synth;
+	SoundWaveform waveForm;
+	float attackTime;
+	float decayTime;
+	float sustainLevel;
+	float releaseTime;
+	float volumeLeft;
+	float volumeRight;
+} midi_synth;
 
 typedef struct sound_effect {
 	PDSynth* synth;
@@ -61,13 +58,46 @@ typedef struct sound_effect {
 	uint32 noteDelay;
 } sound_effect;
 
+PlaydateAPI* pd = NULL;
+const struct playdate_sys* sys = NULL;
+const struct playdate_sound* snd = NULL;
+const struct playdate_graphics* gfx = NULL;
+
+// Display/Graphics
+const char* fontpath = "/System/Fonts/Asheville-Sans-14-Bold.pft";
+LCDFont* font = NULL;
+
+const char* gameBgPath = "images/gameBg.png";
+LCDBitmap* gameBg = NULL;
+
+static int textWidth;
+static int textHeight;
+
+// Player
+static game_entity Player;
+static char text[15] = "Game Template!";
+
+
+// Sound
+static game_music GameMusic;
+static SoundChannel* GameSFX = NULL;
+
+static midi_synth Chords;
+static midi_synth Bass;
+static midi_synth Snare;
+
 static sound_effect bounceSFX;
 static sound_effect bounce2SFX;
 static sound_effect crankDockedSFX;
 static sound_effect crankUndockedSFX;
 
-float deltaTime = 0;
+// Input
+static PDButtons currentButtonDown;
+static PDButtons lastButtonPushed;
+static PDButtons lastButtonReleased;
 
+// Update loop stuff
+static float deltaTime = 0;
 static int update(void* userdata);
 
 static void setupSFX(SoundChannel* fxChannel, sound_effect* fx, float volume)
@@ -102,9 +132,16 @@ static void setupMIDIMusic(game_music* Music, char* midiFileName)
 	// 1. Create new Sequence
 	Music->sequence = snd->sequence->newSequence();
 	// 2. Load midi file
-	snd->sequence->loadMidiFile(Music->sequence, midiFileName); // from http://www.jsbach.net/midi/midi_goldbergvariations.html
+	int midiFileSuccess = snd->sequence->loadMidiFile(Music->sequence, midiFileName); // from http://www.jsbach.net/midi/midi_goldbergvariations.html
+	
+	if (!midiFileSuccess)
+	{
+		// TODO: Throw error?
+	}
 	// 3. Get track count.
 	int trackCount = snd->sequence->getTrackCount(Music->sequence);
+
+	Music->channel = snd->channel->newChannel();
 
 	for(int trackIndex = 0;
 		trackIndex < trackCount;
@@ -114,25 +151,40 @@ static void setupMIDIMusic(game_music* Music, char* midiFileName)
 		snd->instrument->setVolume(inst, Music->volume, Music->volume);
 		
 		// NOTE (matt): Do we need 1 channel per instrument?
-		Music->channel = snd->channel->newChannel();
 		snd->channel->addSource(Music->channel, (SoundSource*)inst);
 
 		SequenceTrack* track = snd->sequence->getTrackAtIndex(Music->sequence, trackIndex);
+		PDSynthInstrument* testInst = snd->track->getInstrument(track);
 		snd->track->setInstrument(track, inst);
+		int controlSigCount = snd->track->getControlSignalCount(track);
+		
+		// NOTE(matt): For now, no polyphonic instruments. Only 1 instrument per track.
+		// setup synth instrument for track
+		midi_synth selectedSynthVoice;
+		selectedSynthVoice.waveForm = kWaveformSquare;
+		selectedSynthVoice.attackTime = .05f;
+		selectedSynthVoice.decayTime = .05f;
+		selectedSynthVoice.sustainLevel = .1f;
+		selectedSynthVoice.releaseTime = 0.1f;
+		selectedSynthVoice.volumeLeft = .05f;
+		selectedSynthVoice.volumeRight = .05f;
 
-		// setup synths
-		for (int polyIndex = snd->track->getPolyphony(track);
-			polyIndex > 0; --polyIndex)
-		{
-			PDSynth* synth = snd->synth->newSynth();
-			snd->synth->setWaveform(synth, kWaveformSquare);
-			snd->synth->setAttackTime(synth, 0.f);
-			snd->synth->setDecayTime(synth, 0.2f);
-			snd->synth->setSustainLevel(synth, 0.3f);
-			snd->synth->setReleaseTime(synth, 0.5f);
-			// add voice to inst
-			snd->instrument->addVoice(inst, synth, 0, 127, 0.0f);
-		}
+		if (trackIndex == CHORDS)
+			selectedSynthVoice = Chords;
+		else if (trackIndex == BASS)
+			selectedSynthVoice = Bass;
+		else if (trackIndex == SNARE)
+			selectedSynthVoice = Snare;
+
+		PDSynth* synth = snd->synth->newSynth();
+		snd->synth->setWaveform(synth, selectedSynthVoice.waveForm);
+		snd->synth->setAttackTime(synth, selectedSynthVoice.attackTime);
+		snd->synth->setDecayTime(synth, selectedSynthVoice.decayTime);
+		snd->synth->setSustainLevel(synth, selectedSynthVoice.sustainLevel);
+		snd->synth->setReleaseTime(synth, selectedSynthVoice.releaseTime);
+
+		// add voice to inst
+		snd->instrument->addVoice(inst, synth, 0, 127, 0.0f);
 	}
 }
 
@@ -174,11 +226,38 @@ int eventHandler(PlaydateAPI* playdate, PDSystemEvent event, uint32_t arg)
 		Player.dy = 50.0f;
 
 		// SOUND
+		//	Music
+		Chords.waveForm = kWaveformSquare;
+		Chords.attackTime = 0.f;
+		Chords.decayTime = 0.f;
+		Chords.sustainLevel = 1.f;
+		Chords.releaseTime = 0.1f;
+		Chords.volumeLeft = .05f;
+		Chords.volumeRight = .05f;
+
+		Bass.waveForm = kWaveformSawtooth;
+		Bass.attackTime = 0.f;
+		Bass.decayTime = 0.f;
+		Bass.sustainLevel = 1.f;
+		Bass.releaseTime = 0.1f;
+		Bass.volumeLeft = .05f;
+		Bass.volumeRight = .05f;
+
+		Snare.waveForm = kWaveformNoise;
+		Snare.attackTime = 0.f;
+		Snare.decayTime = 0.f;
+		Snare.sustainLevel = 1.f;
+		Snare.releaseTime = 0.1f;
+		Snare.volumeLeft = .05f;
+		Snare.volumeRight = .05f;
+		
 		GameMusic.volume = .025f;
 		GameMusic.musicEnabled = 1;
-		setupMIDIMusic(&GameMusic, "bwv1087.mid");
-		snd->sequence->play(GameMusic.sequence, NULL, NULL);
+		//setupMIDIMusic(&GameMusic, "sound/final_countdown.mid");
+		setupMIDIMusic(&GameMusic, "sound/8BitTemplateTest.mid");
+		snd->sequence->play(GameMusic.sequence, NULL, pd);
 
+		//	SFX
 		bounceSFX.waveForm = kWaveformSquare;
 		bounceSFX.attackTime = 0.f;
 		bounceSFX.decayTime = 0.f;
@@ -191,6 +270,7 @@ int eventHandler(PlaydateAPI* playdate, PDSystemEvent event, uint32_t arg)
 		bounceSFX.noteLength = 0.1f;
 		bounceSFX.noteDelay = 0;
 		setupSFX(GameSFX, &bounceSFX, 1.f);
+
 
 		bounce2SFX.waveForm = kWaveformSquare;
 		bounce2SFX.attackTime = 0.f;
@@ -249,6 +329,27 @@ int eventHandler(PlaydateAPI* playdate, PDSystemEvent event, uint32_t arg)
 static int update(void* userdata)
 {
 	(void)userdata; // unused - we use a global pointer to playdate api struct.
+
+	sys->getButtonState(&currentButtonDown, &lastButtonPushed, &lastButtonReleased);
+
+	// Button Down with repeats
+	/*if (currentButtonDown & kButtonA)
+	{
+		//playSFX(&Chords);
+		//sys->logToConsole("current button down: %d", currentButtonDown);
+	}
+	else if (currentButtonDown & kButtonB)
+	{
+		//playSFX(&Bass);
+	}
+	else if (currentButtonDown & kButtonUp)
+	{
+		//playSFX(&Snare);
+	}
+	else if(lastButtonPushed)
+		sys->logToConsole("last button pushed: %d", lastButtonPushed);
+	else if (lastButtonReleased)
+		sys->logToConsole("last button released: %d", lastButtonReleased);*/
 
 	// Switch back to regular drawing mode so we completely redraw all pixels in desired region.
 	gfx->setDrawMode(kDrawModeCopy);
