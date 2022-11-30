@@ -1,9 +1,9 @@
 #pragma once
 
-#include "types.h"
+#include "GLOBALS.h"
 #include "pd_api.h"
 
-// Instrument aliases for .mid files (My own convention).
+// Instrument aliases for .mid files.
 // NOTE(matt): 0 indexed values skipping 0 and 1 due to those always being empty tracks in the exported .mid file.
 #define CHORDS		2
 #define BASS		3
@@ -15,6 +15,7 @@ typedef struct game_music {
 	float volume;
 	int musicEnabled;
 	int loop;
+	int tempo;
 } game_music;
 
 typedef struct midi_synth {
@@ -43,7 +44,12 @@ typedef struct sound_effect {
 	uint32 noteDelay;
 } sound_effect;
 
-extern game_music GameMusic;
+extern game_music Music1;
+extern game_music Music2;
+
+midi_synth Chords;
+midi_synth Bass;
+midi_synth Snare;
 
 extern sound_effect bounceSFX;
 extern sound_effect bounce2SFX;
@@ -55,3 +61,5 @@ void playSFX(sound_effect* fx);
 void setupMIDIMusic(game_music* Music, char* midiFileName);
 void initMidiInstruments();
 void initSFXSynths();
+void swapMidiFileAcb(SoundSequence* seq, void* userdata);
+void swapMidiFileBcb(SoundSequence* seq, void* userdata);

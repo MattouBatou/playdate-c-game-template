@@ -1,7 +1,9 @@
+#include "GLOBALS.h"
 #include "sound.h"
-#include "game.h"
 
-static game_music GameMusic;
+static game_music Music1;
+static game_music Music2;
+
 SoundChannel* GameSFX = NULL;
 
 midi_synth Chords;
@@ -13,8 +15,19 @@ sound_effect bounce2SFX;
 sound_effect crankDockedSFX;
 sound_effect crankUndockedSFX;
 
+void swapMidiFileAcb(SoundSequence* seq, void* userdata) {
+	snd->sequence->setTime(Music2.sequence, 0);
+	snd->sequence->play(Music2.sequence, swapMidiFileBcb, pd);
+}
+
+void swapMidiFileBcb(SoundSequence* seq, void* userdata) {
+	snd->sequence->setTime(Music1.sequence, 0);
+	snd->sequence->play(Music1.sequence, swapMidiFileAcb, pd);
+}
+
 void initMidiInstruments() 
 {
+	sys->logToConsole("GAME_WIDTH: %i", GAME_WIDTH);
 	Chords.waveForm = kWaveformSquare;
 	Chords.attackTime = 0.f;
 	Chords.decayTime = 0.f;
@@ -39,11 +52,21 @@ void initMidiInstruments()
 	Snare.volumeLeft = .05f;
 	Snare.volumeRight = .05f;
 
-	GameMusic.volume = .025f;
-	GameMusic.musicEnabled = 1;
-	GameMusic.loop = 1;
+	Music1.volume = .025f;
+	Music1.musicEnabled = 1;
+	Music1.loop = 1;
+	Music1.tempo = 0;
 
-	setupMIDIMusic(&GameMusic, "sound/8BitTemplateTest.mid");
+	Music2.volume = .025f;
+	Music2.musicEnabled = 1;
+	Music2.loop = 1;
+	Music2.tempo = 0;
+
+	setupMIDIMusic(&Music1, "sound/8BitTemplateTest.mid");
+	setupMIDIMusic(&Music2, "sound/final_countdown.mid");
+
+
+	snd->sequence->play(Music1.sequence, NULL, NULL);
 };
 
 void initSFXSynths() 
@@ -136,17 +159,15 @@ void setupMIDIMusic(game_music* Music, char* midiFileName)
 	// 2. Load midi file
 	int midiFileSuccess = snd->sequence->loadMidiFile(Music->sequence, midiFileName);
 
-	if (!midiFileSuccess)
-	{
+	if (!midiFileSuccess) {
 		// TODO: Throw error?
-		sys->logToConsole("could not load midi file!");
-	}
-	else
-	{
-		sys->logToConsole("midi file loaded!");
+		sys->error("could not load midi file!");
 	}
 
-	snd->sequence->setTempo(Music->sequence, 2000);
+	if (Music->tempo > 0)
+	{
+		snd->sequence->setTempo(Music->sequence, Music->tempo);
+	}
 
 	// 3. Get track count.
 	int trackCount = snd->sequence->getTrackCount(Music->sequence);
@@ -170,7 +191,7 @@ void setupMIDIMusic(game_music* Music, char* midiFileName)
 
 		// NOTE(matt): For now, no polyphonic instruments. Only 1 instrument per track.
 		// setup synth instrument for track
-		static midi_synth selectedSynthVoice;
+		midi_synth selectedSynthVoice;
 		selectedSynthVoice.waveForm = kWaveformSquare;
 		selectedSynthVoice.attackTime = .05f;
 		selectedSynthVoice.decayTime = .05f;
@@ -200,7 +221,5 @@ void setupMIDIMusic(game_music* Music, char* midiFileName)
 	if (Music->loop) 
 	{
 		snd->sequence->setLoops(Music->sequence, 0, snd->sequence->getLength(Music->sequence), 0);
-	}
-
-	snd->sequence->play(Music->sequence, NULL, pd);
+	}	
 }
